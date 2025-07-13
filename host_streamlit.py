@@ -1,9 +1,9 @@
 import os, json, streamlit as st
-import openai
+from openai import OpenAI
 
 from client import MCPClient
 
-openai.api_key = os.getenv("OPENAI_API_KEY", "")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 
 SERVERS = {
     "api": "http://localhost:8001",
@@ -27,15 +27,18 @@ with st.expander("Tools"):
 q = st.text_input("Ask something:")
 if not q:
     st.stop()
-if not openai.api_key:
+if not os.getenv("OPENAI_API_KEY"):
     st.error("Set OPENAI_API_KEY.")
     st.stop()
 
 def to_openai_fn(sid, meta):
     return {
-        "name": f"{sid}_{meta['name']}",
-        "description": meta["description"],
-        "parameters": {"type":"object", "properties": {k: {"type":"string"} for k in meta.get("args_schema", {})}},
+        "type": "function",
+        "function": {
+            "name": f"{sid}_{meta['name']}",
+            "description": meta["description"],
+            "parameters": {"type":"object", "properties": {k: {"type":"string"} for k in meta.get("args_schema", {})}},
+        }
     }
 
 fns = [to_openai_fn(sid, meta) for fq, (c, meta) in registry.items() for sid in [fq.split('.', 1)[0]]]
@@ -51,16 +54,22 @@ If the user asks to read a specific file, use files_read_file directly - do not 
 
 msgs=[{"role":"system","content":system_prompt},
       {"role":"user","content":q}]
-resp=openai.ChatCompletion.create(model="gpt-4o-mini",messages=msgs,functions=fns,function_call="auto")
-msg=resp.choices[0].message
+resp = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=msgs,
+    tools=fns,
+    tool_choice="auto"
+)
+msg = resp.choices[0].message
 
-if msg.get("function_call"):
-    name=msg["function_call"]["name"]
-    args=json.loads(msg["function_call"]["arguments"] or "{}")
-    sid, tool = name.split("_",1)
-    fq=f"{sid}.{tool}"
-    client,_=registry[fq]
-    result=client.call_tool(tool,**args)
+if msg.tool_calls:
+    tool_call = msg.tool_calls[0]
+    name = tool_call.function.name
+    args = json.loads(tool_call.function.arguments or "{}")
+    sid, tool = name.split("_", 1)
+    fq = f"{sid}.{tool}"
+    mcp_client, _ = registry[fq]
+    result = mcp_client.call_tool(tool, **args)
     st.json(result)
 else:
     st.write(msg.content)
