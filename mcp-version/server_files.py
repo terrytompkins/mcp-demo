@@ -1,13 +1,17 @@
 from fastapi import FastAPI
-import os, pathlib
+import sys
+import pathlib
 
-ROOT = pathlib.Path(__file__).parent / "files"
-ROOT.mkdir(exist_ok=True)
+# Add the shared directory to the path
+shared_path = pathlib.Path(__file__).parent.parent / "shared"
+sys.path.insert(0, str(shared_path))
+
+from file_operations import FileOperations
 
 app = FastAPI(title="File Ops MCP Server")
 
-def _safe_path(name: str):
-    return ROOT / pathlib.Path(name).name
+# Initialize file operations with the shared files directory
+file_ops = FileOperations()
 
 @app.post("/list")
 def list_tools():
@@ -23,15 +27,13 @@ def list_tools():
 def call_tool(payload: dict):
     tool = payload.get("tool_name")
     args = payload.get("args", {})
+    
     if tool == "list_files":
-        return {"result": os.listdir(ROOT)}
+        return {"result": file_ops.list_files()}
     elif tool == "read_file":
-        p = _safe_path(args.get("filename", ""))
-        if not p.exists():
-            return {"error": "not found"}
-        return {"result": p.read_text()}
+        result = file_ops.read_file(args.get("filename", ""))
+        return result
     elif tool == "write_file":
-        p = _safe_path(args.get("filename", ""))
-        p.write_text(args.get("content", ""))
-        return {"result": "ok"}
+        result = file_ops.write_file(args.get("filename", ""), args.get("content", ""))
+        return result
     return {"error": "unknown"}
